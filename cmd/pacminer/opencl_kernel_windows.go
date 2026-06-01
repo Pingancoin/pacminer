@@ -131,8 +131,8 @@ __kernel void mine_blake256(
   put_le32(b1 + 16, nonce);
   b1[24] = (uchar)0x80;
   b1[55] = (uchar)0x01;
-  b1[61] = (uchar)0x02;
-  b1[62] = (uchar)0xc0;
+  b1[62] = (uchar)0x02;
+  b1[63] = (uchar)0xc0;
 
   uint h[8] = {
     0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,

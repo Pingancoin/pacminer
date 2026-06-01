@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -59,6 +61,27 @@ func TestJobFromNotifyRequiresHeaderExtension(t *testing.T) {
 	_, err := jobFromNotify([]json.RawMessage{raw("job")}, 1, 1)
 	if err == nil {
 		t.Fatal("expected missing headerhex error")
+	}
+}
+
+func TestOpenCLKernelPadsPACHeaderLength(t *testing.T) {
+	source, err := os.ReadFile("opencl_kernel_windows.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	kernel := string(source)
+	for _, want := range []string{
+		"b1[24] = (uchar)0x80;",
+		"b1[55] = (uchar)0x01;",
+		"b1[62] = (uchar)0x02;",
+		"b1[63] = (uchar)0xc0;",
+	} {
+		if !strings.Contains(kernel, want) {
+			t.Fatalf("OpenCL kernel is missing PAC header padding %q", want)
+		}
+	}
+	if strings.Contains(kernel, "b1[61] = (uchar)0x02;") {
+		t.Fatal("OpenCL kernel writes the 704-bit header length one byte early")
 	}
 }
 
