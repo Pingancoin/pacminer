@@ -21,6 +21,31 @@ Useful options:
 .\pacminer.exe --benchmark --seconds 10 --threads 4
 ```
 
+## Windows GPU mining
+
+The Windows build includes an experimental OpenCL backend for Intel Arc,
+AMD, and NVIDIA drivers. For Intel Arc B580, install the current Intel
+Graphics driver first, then list devices:
+
+```powershell
+.\pacminer.exe --list-devices
+```
+
+Run a GPU benchmark:
+
+```powershell
+.\pacminer.exe --backend opencl --device 0 --benchmark --seconds 10
+```
+
+Mine with the GPU:
+
+```powershell
+.\pacminer.exe --backend opencl --device 0 --user PYourWalletAddress.rig01
+```
+
+If multiple OpenCL devices are shown, change `--device 0` to the Intel Arc B580
+device index.
+
 Defaults:
 
 - Stratum: `stratum.pingancoin.org:3333`

@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	appVersion = "0.1.0"
+	appVersion = "0.2.0"
 
 	headerTimestampOffset = 68
 	headerBitsOffset      = 76
@@ -41,10 +41,14 @@ type config struct {
 	poolURL       string
 	username      string
 	password      string
+	backend       string
+	device        int
 	threads       int
+	workSize      int
 	suggestDiff   float64
 	benchmark     bool
 	benchmarkSecs int
+	listDevices   bool
 	showVersion   bool
 }
 
@@ -96,14 +100,29 @@ type counters struct {
 	submits  atomic.Uint64
 }
 
+type miningBackend interface {
+	Name() string
+	Start(ctx context.Context, state *miningState, shares chan<- share, stats *counters) error
+}
+
 func main() {
 	cfg := parseFlags()
 	if cfg.showVersion {
 		fmt.Printf("pacminer %s\n", appVersion)
 		return
 	}
+	if cfg.listDevices {
+		if err := listOpenCLDevices(); err != nil {
+			fmt.Fprintln(os.Stderr, "pacminer:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if cfg.threads <= 0 {
 		cfg.threads = defaultThreads()
+	}
+	if cfg.workSize <= 0 {
+		cfg.workSize = 1 << 20
 	}
 	if cfg.benchmark {
 		runBenchmark(cfg)
@@ -127,12 +146,17 @@ func parseFlags() config {
 	flag.StringVar(&cfg.poolURL, "url", defaultPool, "Stratum TCP endpoint")
 	flag.StringVar(&cfg.username, "user", "", "pool username, usually PAddress.worker")
 	flag.StringVar(&cfg.password, "pass", "x", "pool password")
+	flag.StringVar(&cfg.backend, "backend", "cpu", "mining backend: cpu or opencl")
+	flag.IntVar(&cfg.device, "device", 0, "OpenCL device index")
 	flag.IntVar(&cfg.threads, "threads", 0, "CPU mining threads, default is half of CPU cores")
+	flag.IntVar(&cfg.workSize, "worksize", 1<<20, "OpenCL nonces per kernel launch")
 	flag.Float64Var(&cfg.suggestDiff, "suggest-diff", 5000000, "suggested share difficulty; lower values submit more shares")
 	flag.BoolVar(&cfg.benchmark, "benchmark", false, "run a local BLAKE-256 benchmark instead of connecting to a pool")
 	flag.IntVar(&cfg.benchmarkSecs, "seconds", 10, "benchmark duration in seconds")
+	flag.BoolVar(&cfg.listDevices, "list-devices", false, "list OpenCL devices and exit")
 	flag.BoolVar(&cfg.showVersion, "version", false, "print version")
 	flag.Parse()
+	cfg.backend = strings.ToLower(strings.TrimSpace(cfg.backend))
 	return cfg
 }
 
@@ -152,16 +176,28 @@ func runStratum(ctx context.Context, cfg config) error {
 
 	state := &miningState{difficulty: 1}
 	stats := &counters{}
-	shares := make(chan share, cfg.threads*4)
+	shares := make(chan share, 1024)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	for i := 0; i < cfg.threads; i++ {
-		go mineLoop(ctx, i, cfg.threads, state, shares, stats)
+	backend, err := newMiningBackend(cfg)
+	if err != nil {
+		return err
+	}
+	backendErr := make(chan error, 1)
+	go func() {
+		backendErr <- backend.Start(ctx, state, shares, stats)
+	}()
+	select {
+	case err := <-backendErr:
+		if err != nil {
+			return err
+		}
+	default:
 	}
 
 	fmt.Printf("pacminer %s\n", appVersion)
-	fmt.Printf("pool=%s user=%s threads=%d\n", addr, cfg.username, cfg.threads)
+	fmt.Printf("pool=%s user=%s backend=%s threads=%d\n", addr, cfg.username, backend.Name(), cfg.threads)
 
 	if _, err := client.call("mining.configure", []any{[]string{"minimum-difficulty"}, map[string]any{}}); err != nil {
 		return err
@@ -188,6 +224,12 @@ func runStratum(ctx context.Context, cfg config) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case err := <-backendErr:
+			cancel()
+			if err == nil {
+				return ctx.Err()
+			}
+			return err
 		case err := <-readErr:
 			cancel()
 			return err
@@ -228,6 +270,37 @@ func runStratum(ctx context.Context, cfg config) error {
 			)
 		}
 	}
+}
+
+func newMiningBackend(cfg config) (miningBackend, error) {
+	switch cfg.backend {
+	case "", "cpu":
+		return cpuBackend{threads: cfg.threads}, nil
+	case "opencl", "gpu":
+		return newOpenCLBackend(cfg)
+	default:
+		return nil, fmt.Errorf("unknown backend %q", cfg.backend)
+	}
+}
+
+type cpuBackend struct {
+	threads int
+}
+
+func (b cpuBackend) Name() string {
+	return "cpu"
+}
+
+func (b cpuBackend) Start(ctx context.Context, state *miningState, shares chan<- share, stats *counters) error {
+	threads := b.threads
+	if threads <= 0 {
+		threads = defaultThreads()
+	}
+	for i := 0; i < threads; i++ {
+		go mineLoop(ctx, i, threads, state, shares, stats)
+	}
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 func handleMessage(msg rpcMessage, username string, state *miningState, stats *counters, pending map[string]share) {
@@ -594,6 +667,11 @@ func formatHashrate(rate float64) string {
 }
 
 func runBenchmark(cfg config) {
+	if cfg.backend == "opencl" || cfg.backend == "gpu" {
+		if runOpenCLBenchmark(cfg) {
+			return
+		}
+	}
 	if cfg.benchmarkSecs <= 0 {
 		cfg.benchmarkSecs = 10
 	}
