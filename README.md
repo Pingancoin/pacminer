@@ -56,6 +56,5 @@ Defaults:
 The username before the first dot is treated as the payout address by
 `pacpool`. For example, `Pabc...xyz.rig01` pays `Pabc...xyz`.
 
-This first release is a CPU test miner. It is meant to verify pool connectivity,
-share acceptance, worker accounting, and solved-block submission. It is not an
-ASIC or GPU optimized miner.
+This release includes the PAC 180-byte header path used by the current pool and
+an experimental OpenCL backend for GPU mining.

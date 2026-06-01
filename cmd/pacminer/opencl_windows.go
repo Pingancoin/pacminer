@@ -472,9 +472,9 @@ func runOpenCLBenchmark(cfg config) bool {
 	defer b.Close()
 
 	header := make([]byte, headerLength)
-	binary.LittleEndian.PutUint64(header[headerTimestampOffset:headerBitsOffset], uint64(time.Now().Unix()))
-	binary.LittleEndian.PutUint32(header[headerBitsOffset:headerNonceOffset], 0x207fffff)
-	binary.LittleEndian.PutUint32(header[headerHeightOffset:headerLength], 1)
+	binary.LittleEndian.PutUint32(header[headerTimestampOffset:headerTimestampOffset+4], uint32(time.Now().Unix()))
+	binary.LittleEndian.PutUint32(header[headerBitsOffset:headerBitsOffset+4], 0x207fffff)
+	binary.LittleEndian.PutUint32(header[headerHeightOffset:headerHeightOffset+4], 1)
 	job := &miningJob{
 		seq:         1,
 		id:          "benchmark",

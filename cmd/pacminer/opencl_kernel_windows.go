@@ -125,21 +125,24 @@ __kernel void mine_blake256(
   uint nonce = start_nonce + gid;
   uchar b0[64];
   uchar b1[64];
+  uchar b2[64];
   for (int i = 0; i < 64; i++) b0[i] = header[i];
-  for (int i = 0; i < 64; i++) b1[i] = (uchar)0;
-  for (int i = 0; i < 24; i++) b1[i] = header[64 + i];
-  put_le32(b1 + 16, nonce);
-  b1[24] = (uchar)0x80;
-  b1[55] = (uchar)0x01;
-  b1[62] = (uchar)0x02;
-  b1[63] = (uchar)0xc0;
+  for (int i = 0; i < 64; i++) b1[i] = header[64 + i];
+  for (int i = 0; i < 64; i++) b2[i] = (uchar)0;
+  for (int i = 0; i < 52; i++) b2[i] = header[128 + i];
+  put_le32(b2 + 12, nonce);
+  b2[52] = (uchar)0x80;
+  b2[55] = (uchar)0x01;
+  b2[62] = (uchar)0x05;
+  b2[63] = (uchar)0xa0;
 
   uint h[8] = {
     0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,
     0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U
   };
   compress(h, b0, (ulong)512);
-  compress(h, b1, (ulong)704);
+  compress(h, b1, (ulong)1024);
+  compress(h, b2, (ulong)1440);
 
   if (hash_le_target(h, target)) {
     if (atomic_cmpxchg(found, 0U, 1U) == 0U) {

@@ -27,7 +27,7 @@ func TestNormalizePoolAddress(t *testing.T) {
 
 func TestJobFromNotifyUsesHeaderExtension(t *testing.T) {
 	header := make([]byte, headerLength)
-	binary.LittleEndian.PutUint32(header[headerHeightOffset:headerLength], 123)
+	binary.LittleEndian.PutUint32(header[headerHeightOffset:headerHeightOffset+4], 123)
 	headerHex := hex.EncodeToString(header)
 	params := []json.RawMessage{
 		raw("job-1"),
@@ -46,13 +46,13 @@ func TestJobFromNotifyUsesHeaderExtension(t *testing.T) {
 	if job.id != "job-1" || job.seq != 9 || job.difficulty != 2 {
 		t.Fatalf("unexpected job metadata: %+v", job)
 	}
-	if got := binary.LittleEndian.Uint64(job.header[headerTimestampOffset:headerBitsOffset]); got != 42 {
+	if got := binary.LittleEndian.Uint32(job.header[headerTimestampOffset : headerTimestampOffset+4]); got != 42 {
 		t.Fatalf("timestamp = %d, want 42", got)
 	}
-	if got := binary.LittleEndian.Uint32(job.header[headerBitsOffset:headerNonceOffset]); got != 0x207fffff {
+	if got := binary.LittleEndian.Uint32(job.header[headerBitsOffset : headerBitsOffset+4]); got != 0x207fffff {
 		t.Fatalf("bits = %08x, want 207fffff", got)
 	}
-	if got := binary.LittleEndian.Uint32(job.header[headerHeightOffset:headerLength]); got != 123 {
+	if got := binary.LittleEndian.Uint32(job.header[headerHeightOffset : headerHeightOffset+4]); got != 123 {
 		t.Fatalf("height = %d, want 123", got)
 	}
 }
@@ -71,17 +71,18 @@ func TestOpenCLKernelPadsPACHeaderLength(t *testing.T) {
 	}
 	kernel := string(source)
 	for _, want := range []string{
-		"b1[24] = (uchar)0x80;",
-		"b1[55] = (uchar)0x01;",
-		"b1[62] = (uchar)0x02;",
-		"b1[63] = (uchar)0xc0;",
+		"b2[52] = (uchar)0x80;",
+		"b2[55] = (uchar)0x01;",
+		"b2[62] = (uchar)0x05;",
+		"b2[63] = (uchar)0xa0;",
+		"compress(h, b2, (ulong)1440);",
 	} {
 		if !strings.Contains(kernel, want) {
 			t.Fatalf("OpenCL kernel is missing PAC header padding %q", want)
 		}
 	}
-	if strings.Contains(kernel, "b1[61] = (uchar)0x02;") {
-		t.Fatal("OpenCL kernel writes the 704-bit header length one byte early")
+	if strings.Contains(kernel, "b1[24] = (uchar)0x80;") {
+		t.Fatal("OpenCL kernel still uses the old 88-byte header padding")
 	}
 }
 

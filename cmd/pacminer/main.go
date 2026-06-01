@@ -26,13 +26,13 @@ import (
 )
 
 const (
-	appVersion = "0.2.0"
+	appVersion = "0.3.0"
 
-	headerTimestampOffset = 68
-	headerBitsOffset      = 76
-	headerNonceOffset     = 80
-	headerHeightOffset    = 84
-	headerLength          = 88
+	headerBitsOffset      = 116
+	headerHeightOffset    = 128
+	headerTimestampOffset = 136
+	headerNonceOffset     = 140
+	headerLength          = 180
 
 	defaultPool = "stratum.pingancoin.org:3333"
 )
@@ -202,7 +202,7 @@ func runStratum(ctx context.Context, cfg config) error {
 	if _, err := client.call("mining.configure", []any{[]string{"minimum-difficulty"}, map[string]any{}}); err != nil {
 		return err
 	}
-	if _, err := client.call("mining.subscribe", []any{}); err != nil {
+	if _, err := client.call("mining.subscribe", []any{fmt.Sprintf("pacminer/%s", appVersion)}); err != nil {
 		return err
 	}
 	if cfg.suggestDiff > 0 {
@@ -414,7 +414,7 @@ func mineLoop(ctx context.Context, workerID int, workers int, state *miningState
 			if state.currentSeq() != seen {
 				break
 			}
-			binary.LittleEndian.PutUint32(header[headerNonceOffset:headerHeightOffset], nonce)
+			binary.LittleEndian.PutUint32(header[headerNonceOffset:headerNonceOffset+4], nonce)
 			hash := blake256.Sum256(header)
 			stats.hashes.Add(1)
 			if bytes.Compare(hash[:], job.shareTarget[:]) <= 0 {
@@ -476,9 +476,9 @@ func jobFromNotify(params []json.RawMessage, difficulty float64, seq uint64) (*m
 		difficulty = 1
 	}
 
-	binary.LittleEndian.PutUint64(header[headerTimestampOffset:headerBitsOffset], uint64(ntime))
-	binary.LittleEndian.PutUint32(header[headerBitsOffset:headerNonceOffset], uint32(bits))
-	binary.LittleEndian.PutUint32(header[headerNonceOffset:headerHeightOffset], 0)
+	binary.LittleEndian.PutUint32(header[headerTimestampOffset:headerTimestampOffset+4], uint32(ntime))
+	binary.LittleEndian.PutUint32(header[headerBitsOffset:headerBitsOffset+4], uint32(bits))
+	binary.LittleEndian.PutUint32(header[headerNonceOffset:headerNonceOffset+4], 0)
 
 	return &miningJob{
 		seq:         seq,
@@ -685,9 +685,9 @@ func runBenchmark(cfg config) {
 		go func(worker int) {
 			defer wg.Done()
 			header := make([]byte, headerLength)
-			binary.LittleEndian.PutUint64(header[headerTimestampOffset:headerBitsOffset], uint64(time.Now().Unix()))
-			binary.LittleEndian.PutUint32(header[headerBitsOffset:headerNonceOffset], 0x207fffff)
-			binary.LittleEndian.PutUint32(header[headerHeightOffset:headerLength], 1)
+			binary.LittleEndian.PutUint32(header[headerTimestampOffset:headerTimestampOffset+4], uint32(time.Now().Unix()))
+			binary.LittleEndian.PutUint32(header[headerBitsOffset:headerBitsOffset+4], 0x207fffff)
+			binary.LittleEndian.PutUint32(header[headerHeightOffset:headerHeightOffset+4], 1)
 			nonce := uint32(time.Now().UnixNano()) + uint32(worker)
 			step := uint32(cfg.threads)
 			if step == 0 {
@@ -700,7 +700,7 @@ func runBenchmark(cfg config) {
 				default:
 				}
 				for i := 0; i < 32768; i++ {
-					binary.LittleEndian.PutUint32(header[headerNonceOffset:headerHeightOffset], nonce)
+					binary.LittleEndian.PutUint32(header[headerNonceOffset:headerNonceOffset+4], nonce)
 					_ = blake256.Sum256(header)
 					hashes.Add(1)
 					nonce += step
