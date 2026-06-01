@@ -46,12 +46,18 @@ Mine with the GPU:
 If multiple OpenCL devices are shown, change `--device 0` to the Intel Arc B580
 device index.
 
+The default GPU mode prints a compact hashrate line every 5 seconds instead of
+printing every accepted share. Add `--verbose` when you need per-share debugging
+output. For lower GPU usage, increase `--worksize`; for more frequent pool
+shares, lower `--suggest-diff`.
+
 Defaults:
 
 - Stratum: `stratum.pingancoin.org:3333`
 - Password: `x`
 - Threads: half of the local CPU cores
-- Suggested share difficulty: `5000000`
+- OpenCL work size: `67108864`
+- Suggested share difficulty: `100000000`
 
 The username before the first dot is treated as the payout address by
 `pacpool`. For example, `Pabc...xyz.rig01` pays `Pabc...xyz`.

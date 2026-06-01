@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	appVersion = "0.3.0"
+	appVersion = "0.3.1"
 
 	headerBitsOffset      = 116
 	headerHeightOffset    = 128
@@ -34,7 +34,9 @@ const (
 	headerNonceOffset     = 140
 	headerLength          = 180
 
-	defaultPool = "stratum.pingancoin.org:3333"
+	defaultPool                     = "stratum.pingancoin.org:3333"
+	defaultOpenCLWorkSize           = 1 << 26
+	defaultSuggestedShareDifficulty = 100_000_000
 )
 
 type config struct {
@@ -50,6 +52,7 @@ type config struct {
 	benchmarkSecs int
 	listDevices   bool
 	showVersion   bool
+	verbose       bool
 }
 
 type rpcMessage struct {
@@ -122,7 +125,7 @@ func main() {
 		cfg.threads = defaultThreads()
 	}
 	if cfg.workSize <= 0 {
-		cfg.workSize = 1 << 20
+		cfg.workSize = defaultOpenCLWorkSize
 	}
 	if cfg.benchmark {
 		runBenchmark(cfg)
@@ -149,12 +152,13 @@ func parseFlags() config {
 	flag.StringVar(&cfg.backend, "backend", "cpu", "mining backend: cpu or opencl")
 	flag.IntVar(&cfg.device, "device", 0, "OpenCL device index")
 	flag.IntVar(&cfg.threads, "threads", 0, "CPU mining threads, default is half of CPU cores")
-	flag.IntVar(&cfg.workSize, "worksize", 1<<20, "OpenCL nonces per kernel launch")
-	flag.Float64Var(&cfg.suggestDiff, "suggest-diff", 5000000, "suggested share difficulty; lower values submit more shares")
+	flag.IntVar(&cfg.workSize, "worksize", defaultOpenCLWorkSize, "OpenCL nonces per kernel launch")
+	flag.Float64Var(&cfg.suggestDiff, "suggest-diff", defaultSuggestedShareDifficulty, "suggested share difficulty; lower values submit more shares")
 	flag.BoolVar(&cfg.benchmark, "benchmark", false, "run a local BLAKE-256 benchmark instead of connecting to a pool")
 	flag.IntVar(&cfg.benchmarkSecs, "seconds", 10, "benchmark duration in seconds")
 	flag.BoolVar(&cfg.listDevices, "list-devices", false, "list OpenCL devices and exit")
 	flag.BoolVar(&cfg.showVersion, "version", false, "print version")
+	flag.BoolVar(&cfg.verbose, "verbose", false, "print every job and share response")
 	flag.Parse()
 	cfg.backend = strings.ToLower(strings.TrimSpace(cfg.backend))
 	return cfg
@@ -234,7 +238,7 @@ func runStratum(ctx context.Context, cfg config) error {
 			cancel()
 			return err
 		case msg := <-messages:
-			handleMessage(msg, cfg.username, state, stats, pending)
+			handleMessage(msg, cfg.username, state, stats, pending, cfg.verbose)
 		case sh := <-shares:
 			if sh.jobSeq != state.currentSeq() {
 				continue
@@ -303,7 +307,7 @@ func (b cpuBackend) Start(ctx context.Context, state *miningState, shares chan<-
 	return ctx.Err()
 }
 
-func handleMessage(msg rpcMessage, username string, state *miningState, stats *counters, pending map[string]share) {
+func handleMessage(msg rpcMessage, username string, state *miningState, stats *counters, pending map[string]share, verbose bool) {
 	switch msg.Method {
 	case "mining.set_difficulty":
 		diff, err := parseFloatParam(msg.Params, 0)
@@ -312,7 +316,9 @@ func handleMessage(msg rpcMessage, username string, state *miningState, stats *c
 			return
 		}
 		state.setDifficulty(diff)
-		fmt.Printf("pool difficulty set to %.4f\n", diff)
+		if verbose {
+			fmt.Printf("pool difficulty set to %.4f\n", diff)
+		}
 	case "mining.notify":
 		job, err := jobFromNotify(msg.Params, state.currentDifficulty(), state.nextSeq())
 		if err != nil {
@@ -320,7 +326,9 @@ func handleMessage(msg rpcMessage, username string, state *miningState, stats *c
 			return
 		}
 		state.setJob(job)
-		fmt.Printf("new job %s bits=%s ntime=%s\n", job.id, job.bitsHex, job.ntimeHex)
+		if verbose {
+			fmt.Printf("new job %s bits=%s ntime=%s\n", job.id, job.bitsHex, job.ntimeHex)
+		}
 	default:
 		if len(msg.ID) == 0 {
 			return
@@ -330,17 +338,23 @@ func handleMessage(msg rpcMessage, username string, state *miningState, stats *c
 			delete(pending, id)
 			if hasRPCError(msg.Error) {
 				stats.rejected.Add(1)
-				fmt.Printf("share rejected nonce=%s hash=%s error=%s\n", sh.nonceHex, sh.hash, compactJSON(msg.Error))
+				if verbose {
+					fmt.Printf("share rejected nonce=%s hash=%s error=%s\n", sh.nonceHex, sh.hash, compactJSON(msg.Error))
+				}
 				return
 			}
 			okResult := false
 			_ = json.Unmarshal(msg.Result, &okResult)
 			if okResult {
 				stats.accepted.Add(1)
-				fmt.Printf("share accepted nonce=%s hash=%s worker=%s\n", sh.nonceHex, sh.hash, username)
+				if verbose {
+					fmt.Printf("share accepted nonce=%s hash=%s worker=%s\n", sh.nonceHex, sh.hash, username)
+				}
 			} else {
 				stats.rejected.Add(1)
-				fmt.Printf("share rejected nonce=%s hash=%s\n", sh.nonceHex, sh.hash)
+				if verbose {
+					fmt.Printf("share rejected nonce=%s hash=%s\n", sh.nonceHex, sh.hash)
+				}
 			}
 		} else if hasRPCError(msg.Error) {
 			fmt.Printf("pool response error id=%s error=%s\n", id, compactJSON(msg.Error))

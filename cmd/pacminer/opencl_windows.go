@@ -121,7 +121,7 @@ func newOpenCLBackend(cfg config) (miningBackend, error) {
 	}
 	workSize := cfg.workSize
 	if workSize <= 0 {
-		workSize = 1 << 20
+		workSize = defaultOpenCLWorkSize
 	}
 	b := &openCLBackend{
 		deviceIndex: cfg.device,
@@ -458,7 +458,7 @@ func clString(proc *syscall.LazyProc, object uintptr, param uintptr) string {
 
 func runOpenCLBenchmark(cfg config) bool {
 	if cfg.workSize <= 0 {
-		cfg.workSize = 1 << 20
+		cfg.workSize = defaultOpenCLWorkSize
 	}
 	if cfg.benchmarkSecs <= 0 {
 		cfg.benchmarkSecs = 10
