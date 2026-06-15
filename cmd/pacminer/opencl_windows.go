@@ -143,6 +143,7 @@ func (b *openCLBackend) Start(ctx context.Context, state *miningState, shares ch
 	defer b.Close()
 	var seen uint64
 	nonce := uint32(time.Now().UnixNano())
+	extra := uint64(time.Now().UnixNano())
 	for {
 		select {
 		case <-ctx.Done():
@@ -158,17 +159,28 @@ func (b *openCLBackend) Start(ctx context.Context, state *miningState, shares ch
 		if job.seq != seen {
 			seen = job.seq
 			nonce = uint32(time.Now().UnixNano())
+			extra = uint64(time.Now().UnixNano())
 		}
 
-		foundNonce, foundHash, found, err := b.scan(job, nonce, uint32(b.workSize))
+		scanCount := uint32(b.workSize)
+		if scanCount == 0 {
+			scanCount = 1
+		}
+		remaining := uint64(^uint32(0)) - uint64(nonce) + 1
+		if uint64(scanCount) > remaining {
+			scanCount = uint32(remaining)
+		}
+		workJob, extraHex := job.withExtraNonce(extra)
+		foundNonce, foundHash, found, err := b.scan(workJob, nonce, scanCount)
 		if err != nil {
 			return err
 		}
-		stats.hashes.Add(uint64(b.workSize))
+		stats.hashes.Add(uint64(scanCount))
 		if found && state.currentSeq() == seen {
 			sh := share{
 				jobSeq:   job.seq,
 				jobID:    job.id,
+				extraHex: extraHex,
 				ntimeHex: job.ntimeHex,
 				nonceHex: fmt.Sprintf("%08x", foundNonce),
 				nonce:    foundNonce,
@@ -180,7 +192,11 @@ func (b *openCLBackend) Start(ctx context.Context, state *miningState, shares ch
 				return ctx.Err()
 			}
 		}
-		nonce += uint32(b.workSize)
+		prev := nonce
+		nonce += scanCount
+		if nonce < prev || uint64(scanCount) == remaining {
+			extra++
+		}
 	}
 }
 

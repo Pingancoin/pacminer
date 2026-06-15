@@ -26,12 +26,13 @@ import (
 )
 
 const (
-	appVersion = "0.3.1"
+	appVersion = "0.3.2"
 
 	headerBitsOffset      = 116
 	headerHeightOffset    = 128
 	headerTimestampOffset = 136
 	headerNonceOffset     = 140
+	headerExtraDataOffset = 144
 	headerLength          = 180
 
 	defaultPool                     = "stratum.pingancoin.org:3333"
@@ -82,6 +83,7 @@ type miningJob struct {
 	id          string
 	bitsHex     string
 	ntimeHex    string
+	ntime       uint32
 	header      []byte
 	shareTarget [32]byte
 	difficulty  float64
@@ -90,6 +92,7 @@ type miningJob struct {
 type share struct {
 	jobSeq   uint64
 	jobID    string
+	extraHex string
 	ntimeHex string
 	nonceHex string
 	nonce    uint32
@@ -101,6 +104,24 @@ type counters struct {
 	accepted atomic.Uint64
 	rejected atomic.Uint64
 	submits  atomic.Uint64
+}
+
+func (j *miningJob) withExtraNonce(extra uint64) (*miningJob, string) {
+	extraHex := extraNonceHex(extra)
+	if j == nil {
+		return nil, extraHex
+	}
+	clone := *j
+	clone.header = append([]byte(nil), j.header...)
+	extraBytes, _ := hex.DecodeString(extraHex)
+	copy(clone.header[headerExtraDataOffset:headerExtraDataOffset+len(extraBytes)], extraBytes)
+	return &clone, extraHex
+}
+
+func extraNonceHex(extra uint64) string {
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], extra)
+	return hex.EncodeToString(buf[:])
 }
 
 type miningBackend interface {
@@ -243,7 +264,7 @@ func runStratum(ctx context.Context, cfg config) error {
 			if sh.jobSeq != state.currentSeq() {
 				continue
 			}
-			id, err := client.call("mining.submit", []any{cfg.username, sh.jobID, "", sh.ntimeHex, sh.nonceHex})
+			id, err := client.call("mining.submit", []any{cfg.username, sh.jobID, sh.extraHex, sh.ntimeHex, sh.nonceHex})
 			if err != nil {
 				cancel()
 				return err
@@ -422,8 +443,10 @@ func mineLoop(ctx context.Context, workerID int, workers int, state *miningState
 			nonce = uint32(time.Now().UnixNano()) + uint32(workerID)
 		}
 
-		header := make([]byte, len(job.header))
-		copy(header, job.header)
+		extra := uint64(time.Now().UnixNano()) + uint64(workerID)
+		workJob, extraHex := job.withExtraNonce(extra)
+		header := make([]byte, len(workJob.header))
+		copy(header, workJob.header)
 		for i := 0; i < 32768; i++ {
 			if state.currentSeq() != seen {
 				break
@@ -435,6 +458,7 @@ func mineLoop(ctx context.Context, workerID int, workers int, state *miningState
 				sh := share{
 					jobSeq:   job.seq,
 					jobID:    job.id,
+					extraHex: extraHex,
 					ntimeHex: job.ntimeHex,
 					nonceHex: fmt.Sprintf("%08x", nonce),
 					nonce:    nonce,
@@ -446,7 +470,13 @@ func mineLoop(ctx context.Context, workerID int, workers int, state *miningState
 					return
 				}
 			}
+			prev := nonce
 			nonce += step
+			if nonce < prev {
+				extra += uint64(step)
+				workJob, extraHex = job.withExtraNonce(extra)
+				copy(header, workJob.header)
+			}
 		}
 	}
 }
@@ -486,11 +516,12 @@ func jobFromNotify(params []json.RawMessage, difficulty float64, seq uint64) (*m
 	if err != nil {
 		return nil, fmt.Errorf("bad ntime %q: %w", ntimeHex, err)
 	}
+	ntime32 := uint32(ntime)
 	if difficulty <= 0 || math.IsNaN(difficulty) || math.IsInf(difficulty, 0) {
 		difficulty = 1
 	}
 
-	binary.LittleEndian.PutUint32(header[headerTimestampOffset:headerTimestampOffset+4], uint32(ntime))
+	binary.LittleEndian.PutUint32(header[headerTimestampOffset:headerTimestampOffset+4], ntime32)
 	binary.LittleEndian.PutUint32(header[headerBitsOffset:headerBitsOffset+4], uint32(bits))
 	binary.LittleEndian.PutUint32(header[headerNonceOffset:headerNonceOffset+4], 0)
 
@@ -499,6 +530,7 @@ func jobFromNotify(params []json.RawMessage, difficulty float64, seq uint64) (*m
 		id:          jobID,
 		bitsHex:     bitsHex,
 		ntimeHex:    ntimeHex,
+		ntime:       ntime32,
 		header:      header,
 		shareTarget: targetBytes(difficultyToTarget(difficulty)),
 		difficulty:  difficulty,
