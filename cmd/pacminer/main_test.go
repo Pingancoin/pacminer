@@ -64,6 +64,16 @@ func TestJobFromNotifyRequiresHeaderExtension(t *testing.T) {
 	}
 }
 
+func TestExtraNonceHexUsesFullPoolPayload(t *testing.T) {
+	got := extraNonceHex(0x1122334455667788)
+	if len(got) != 24 {
+		t.Fatalf("extraNonceHex length = %d, want 24 hex chars", len(got))
+	}
+	if got == "8877665544332211" {
+		t.Fatal("extraNonceHex must submit the full 12-byte payload, not the old 8-byte form")
+	}
+}
+
 func TestOpenCLKernelPadsPACHeaderLength(t *testing.T) {
 	source, err := os.ReadFile("opencl_kernel_windows.go")
 	if err != nil {

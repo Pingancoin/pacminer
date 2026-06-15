@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	appVersion = "0.3.2"
+	appVersion = "0.3.3"
 
 	headerBitsOffset      = 116
 	headerHeightOffset    = 128
@@ -119,8 +119,9 @@ func (j *miningJob) withExtraNonce(extra uint64) (*miningJob, string) {
 }
 
 func extraNonceHex(extra uint64) string {
-	var buf [8]byte
+	var buf [12]byte
 	binary.LittleEndian.PutUint64(buf[:], extra)
+	binary.LittleEndian.PutUint32(buf[8:], uint32(extra>>32))
 	return hex.EncodeToString(buf[:])
 }
 
